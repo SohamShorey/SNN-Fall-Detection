@@ -77,3 +77,7 @@ eval:
   # test-fall recall is reported at each of these impact positions (s); ones outside the window are skipped
   diagnostic_offsets_s: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5]
   threshold_metric: f1            # metric maximised on val to choose the decision threshold: f1 | accuracy
+
+energy:                           # per-operation energy for the SNN vs matched-ANN estimate (metrics.json "efficiency")
+  e_mac_pj: 4.6                   # multiply-accumulate; 45 nm, 32-bit float (Horowitz, ISSCC 2014)
+  e_ac_pj: 0.9                    # accumulate (spike-driven synapse)

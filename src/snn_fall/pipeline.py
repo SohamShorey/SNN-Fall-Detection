@@ -12,6 +12,7 @@ from torch.utils.data import DataLoader
 from . import plotting
 from .config import Config, load_config
 from .data import FallDataset, load_or_preprocess, shifted_eval_set, summarize, task_view
+from .energy import count_operations
 from .evaluate import compute_metrics, multiclass_metrics, select_threshold, threshold_sweep
 from .model import SCNN, count_parameters
 from .stdp import STDPTrainer
@@ -98,6 +99,7 @@ def evaluate_run(run_dir: Path, data: dict | None = None, device: torch.device |
     ok = correct(p_diag, diag["y"])
     by_offset = {f"{o:g}": float(ok[diag["offset_s"] == o].mean()) for o in offsets if (diag["offset_s"] == o).any()}
     results["test_fall_correct_by_impact_offset_s"] = by_offset
+    results["efficiency"] = count_operations(model, loaders["test"], device, cfg.energy)
 
     with open(run_dir / "metrics.json", "w") as f:
         json.dump(results, f, indent=2)
@@ -128,5 +130,10 @@ def evaluate_run(run_dir: Path, data: dict | None = None, device: torch.device |
                   f"F1 {m['f1']:.3f}  (n={m['support']})")
     print(f"Test falls handled correctly by impact position (s): "
           + "  ".join(f"{k}:{v:.0%}" for k, v in by_offset.items()))
+    e = results["efficiency"]["per_inference"]
+    print(f"Per inference: {e['input_spikes']:.0f} input + {e['network_spikes']:.0f} network spikes | "
+          f"SNN {e['snn_synaptic_ac']:,.0f} synaptic AC, {e['snn_total_energy_nj']:.0f} nJ | "
+          f"matched ANN {e['ann_synaptic_mac']:,.0f} MAC, {e['ann_total_energy_nj']:.0f} nJ | "
+          f"ANN/SNN energy {e['total_energy_ratio_ann_over_snn']:.1f}x")
     print(f"Results written to {run_dir}")
     return results

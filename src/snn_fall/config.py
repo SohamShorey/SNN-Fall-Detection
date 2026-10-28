@@ -103,6 +103,13 @@ class EvalConfig:
 
 
 @dataclass
+class EnergyConfig:
+    # Energy per operation (pJ). Defaults: 45 nm CMOS, 32-bit float (Horowitz, ISSCC 2014).
+    e_mac_pj: float = 4.6  # multiply-accumulate (ANN synapse, dense SNN work)
+    e_ac_pj: float = 0.9   # accumulate (SNN synapse driven by a spike)
+
+
+@dataclass
 class TaskConfig:
     # binary:        ADL vs fall (the fall detector).
     # fall_category: fall windows only, labelled by the groups in fall_groups (ADLs dropped).
@@ -125,6 +132,7 @@ class Config:
     stdp: STDPConfig = field(default_factory=STDPConfig)
     train: TrainConfig = field(default_factory=TrainConfig)
     eval: EvalConfig = field(default_factory=EvalConfig)
+    energy: EnergyConfig = field(default_factory=EnergyConfig)
 
     def to_dict(self) -> dict[str, Any]:
         return dataclasses.asdict(self)
@@ -171,7 +179,8 @@ def _build(cls, raw: dict):
     kwargs = {}
     for name, value in raw.items():
         sub = {"data": DataConfig, "encoding": EncodingConfig, "model": ModelConfig,
-               "stdp": STDPConfig, "train": TrainConfig, "eval": EvalConfig, "task": TaskConfig}.get(name) if cls is Config else None
+               "stdp": STDPConfig, "train": TrainConfig, "eval": EvalConfig, "task": TaskConfig,
+               "energy": EnergyConfig}.get(name) if cls is Config else None
         kwargs[name] = _build(sub, value) if sub is not None else value
     return cls(**kwargs)
 

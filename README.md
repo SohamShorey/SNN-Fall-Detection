@@ -28,6 +28,7 @@ src/snn_fall/
   stdp.py           unsupervised STDP pretraining of the conv layers
   train.py          BPTT training loop (AdamW, ReduceLROnPlateau, early stopping on val F1)
   evaluate.py       metrics, threshold sweep / selection
+  energy.py         spike / operation counts and energy estimate vs matched ANN
   plotting.py       training curves, threshold sweep, confusion matrix
   pipeline.py       end-to-end experiment and evaluation of a run
 scripts/
@@ -106,6 +107,13 @@ Each run writes to `runs/<timestamp>_<name>/`:
 | `threshold_sweep_val.csv/.png` | decision-threshold sweep on the validation split |
 | `metrics.json`, `confusion_test.png` | val and **test** metrics at the threshold chosen on val: `test` (falls at every `eval.fall_offsets_s` position) and `test_aligned` (impact at `data.fall_pre_s`) |
 | `by_offset_test.png` | share of test falls handled correctly (detector: detected; direction model: right class) vs. where the impact sits in the window |
+
+`metrics.json` also has an `efficiency` block, measured on the test windows: spikes per
+inference, per-layer firing rates and synaptic sparsity, SNN synaptic accumulates (AC) vs the
+multiply-accumulates (MAC) of an architecture-matched ANN, and estimated energy per inference.
+Energy uses 4.6 pJ/MAC and 0.9 pJ/AC (45 nm, 32-bit float; Horowitz, ISSCC 2014), set under
+`energy:` in the config. It counts compute only: memory access, spike encoding and control are
+excluded, so treat it as a first-order comparison, not a hardware measurement.
 
 For the direction model, `metrics.json` holds accuracy, balanced accuracy, macro precision /
 recall / F1 / AUC, per-class scores and the confusion matrix; no threshold is tuned (argmax).

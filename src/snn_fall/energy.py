@@ -47,10 +47,36 @@ class _Tally:
             row[k] = row.get(k, 0.0) + float(v)
 
 
+def count_dense_operations(model: SCNN, device: torch.device, cfg_energy: EnergyConfig) -> dict:
+    """Operations and energy per inference of the ANN twin (every weight used at every position)."""
+    T = model.encoders["ttfs"].t_max
+    mac, gn, units = 0.0, 0.0, 0.0
+    for p in PATHS:
+        for conv in (model.paths[p].conv1, model.paths[p].conv2):
+            mac += _dense_conv_pairs(conv, T, device) * conv.out_channels
+            gn += GN_MACS_PER_ELEMENT * conv.out_channels * T
+            units += conv.out_channels * T
+    for fc in [model.heads[p].fc for p in PATHS] + [model.hidden.fc, model.out.fc]:
+        mac += fc.in_features * fc.out_features * T
+        units += fc.out_features * T
+    e_mac, e_ac = cfg_energy.e_mac_pj, cfg_energy.e_ac_pj
+    return {
+        "assumptions": {"e_mac_pj": e_mac, "e_ac_pj": e_ac, "t_max": T, "gn_macs_per_element": GN_MACS_PER_ELEMENT,
+                        "excluded": "memory access, spike encoding, GroupNorm statistics, ReLU, control logic"},
+        "per_inference": {
+            "ann_synaptic_mac": mac, "ann_dense_mac": gn, "ann_dense_ac": units,
+            "ann_synaptic_energy_nj": mac * e_mac / 1e3,
+            "ann_total_energy_nj": ((mac + gn) * e_mac + units * e_ac) / 1e3,
+        },
+    }
+
+
 @torch.no_grad()
 def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: EnergyConfig) -> dict:
     """Average spikes, operations and energy per inference over ``loader`` for the SNN and
-    the architecture-matched ANN."""
+    the architecture-matched ANN (dense counts only, if ``model`` is the ANN twin)."""
+    if not model.spiking:
+        return count_dense_operations(model, device, cfg_energy)
     model.eval()
     snn, n = _Tally(), 0
     for x, fs1, _ in loader:

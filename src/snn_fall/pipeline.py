@@ -131,9 +131,12 @@ def evaluate_run(run_dir: Path, data: dict | None = None, device: torch.device |
     print(f"Test falls handled correctly by impact position (s): "
           + "  ".join(f"{k}:{v:.0%}" for k, v in by_offset.items()))
     e = results["efficiency"]["per_inference"]
-    print(f"Per inference: {e['input_spikes']:.0f} input + {e['network_spikes']:.0f} network spikes | "
-          f"SNN {e['snn_synaptic_ac']:,.0f} synaptic AC, {e['snn_total_energy_nj']:.0f} nJ | "
-          f"matched ANN {e['ann_synaptic_mac']:,.0f} MAC, {e['ann_total_energy_nj']:.0f} nJ | "
-          f"ANN/SNN energy {e['total_energy_ratio_ann_over_snn']:.1f}x")
+    if model.spiking:
+        print(f"Per inference: {e['input_spikes']:.0f} input + {e['network_spikes']:.0f} network spikes | "
+              f"SNN {e['snn_synaptic_ac']:,.0f} synaptic AC, {e['snn_total_energy_nj']:.0f} nJ | "
+              f"matched ANN {e['ann_synaptic_mac']:,.0f} MAC, {e['ann_total_energy_nj']:.0f} nJ | "
+              f"ANN/SNN energy {e['total_energy_ratio_ann_over_snn']:.1f}x")
+    else:
+        print(f"Per inference (ANN twin): {e['ann_synaptic_mac']:,.0f} MAC, {e['ann_total_energy_nj']:.0f} nJ")
     print(f"Results written to {run_dir}")
     return results

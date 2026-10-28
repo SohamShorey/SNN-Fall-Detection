@@ -1,0 +1,11 @@
+# Baseline: ANN twin of the fall detector. Same encoders, layers and shapes as the SCNN in
+# default.yaml, with ReLU instead of LIF neurons (no STDP). Isolates the effect of spiking.
+#   python scripts/train.py --config configs/ann_twin.yaml --name ann_twin
+
+base: default.yaml
+
+model:
+  kind: ann
+
+stdp:
+  enabled: false

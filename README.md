@@ -29,12 +29,15 @@ src/snn_fall/
   train.py          BPTT training loop (AdamW, ReduceLROnPlateau, early stopping on val F1)
   evaluate.py       metrics, threshold sweep / selection
   energy.py         spike / operation counts and energy estimate vs matched ANN
+  baselines.py      threshold, rule-based and classical ML baselines
   plotting.py       training curves, threshold sweep, confusion matrix
   pipeline.py       end-to-end experiment and evaluation of a run
 scripts/
   preprocess.py     build data/processed/*.npz
   train.py          STDP -> supervised training -> val/test evaluation
   evaluate.py       re-evaluate an existing run directory
+  baselines.py      run the threshold / classical ML baselines
+  compare.py        comparison table across runs
 ```
 
 ## Setup
@@ -59,6 +62,33 @@ python scripts/train.py --name detector
 ```bash
 python scripts/train.py --config configs/fall_direction.yaml --name direction
 ```
+
+Baselines on the same windows, subjects and evaluation:
+
+```bash
+python scripts/train.py --config configs/ann_twin.yaml --name ann_twin
+```
+
+```bash
+python scripts/baselines.py
+```
+
+```bash
+python scripts/baselines.py --config configs/fall_direction.yaml --name direction
+```
+
+```bash
+python scripts/compare.py
+```
+
+- **ANN twin** (`configs/ann_twin.yaml`, `configs/ann_twin_direction.yaml`): the same network with
+  ReLU instead of LIF neurons and no STDP; same parameter count, isolates the effect of spiking.
+- **`baselines.py`**: threshold detectors (peak acceleration; peak acceleration + angular rate) or,
+  for fall direction, a nearest-centroid rule on the impact direction; plus RBF-SVM, Random Forest
+  and k-NN on window statistics. Thresholds and hyper-parameters are chosen on the validation
+  subjects. Training falls are re-cut at 5 impact positions over `train.fall_shift_s`.
+- **`compare.py`** gathers every run's test metrics, parameters, operations and estimated energy
+  into `runs/comparison.csv` and prints one table per task.
 
 The direction groups (which SisFall fall codes belong to which class) are listed in
 [configs/fall_direction.yaml](configs/fall_direction.yaml) and can be edited there.

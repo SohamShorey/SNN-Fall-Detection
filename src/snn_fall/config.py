@@ -48,6 +48,7 @@ class EncodingConfig:
 
 @dataclass
 class ModelConfig:
+    kind: str = "scnn"  # scnn (spiking) | ann (ANN twin: same layers with ReLU instead of LIF)
     conv_channels: int = 32
     kernel1: int = 5
     kernel2: int = 3
@@ -234,6 +235,12 @@ def validate(cfg: Config) -> None:
     check(m.conv_channels % m.gn_groups == 0,
           f"model.conv_channels ({m.conv_channels}) must be divisible by model.gn_groups ({m.gn_groups}).")
     check(0 < m.beta <= 1, "model.beta must be in (0, 1].")
+    check(m.kind in ("scnn", "ann"), "model.kind must be 'scnn' or 'ann'.")
+    if m.kind == "ann":
+        check(not cfg.stdp.enabled, "STDP pretraining applies to the spiking model only: set stdp.enabled=false "
+                                    "for model.kind=ann.")
+        check(t.loss_rate_weight == 0, "The spike-rate loss needs spiking outputs: set train.loss_rate_weight=0 "
+                                       "for model.kind=ann.")
     for layer in ("conv1", "conv2"):
         check(layer in cfg.stdp.target_rel and layer in cfg.stdp.max_step_frac,
               f"stdp.target_rel and stdp.max_step_frac need a value for {layer}.")

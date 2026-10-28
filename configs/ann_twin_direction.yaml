@@ -1,0 +1,11 @@
+# Baseline: ANN twin of the fall-direction model (fall_direction.yaml) with ReLU instead of
+# LIF neurons (no STDP).
+#   python scripts/train.py --config configs/ann_twin_direction.yaml --name ann_twin_direction
+
+base: fall_direction.yaml
+
+model:
+  kind: ann
+
+stdp:
+  enabled: false

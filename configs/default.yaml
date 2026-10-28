@@ -35,10 +35,12 @@ encoding:
   fs1_threshold: 0.01
 
 model:
+  kind: scnn                      # scnn (spiking) | ann (ANN twin, see configs/ann_twin.yaml)
   conv_channels: 32
   kernel1: 5
   kernel2: 3
   gn_groups: 4
+  norm: group                     # group (GroupNorm after each conv) | none
   head_dim: 64
   hidden_dim: 128
   beta: 0.9                       # LIF membrane decay

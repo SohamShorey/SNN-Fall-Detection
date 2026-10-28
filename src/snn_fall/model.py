@@ -42,16 +42,17 @@ def run_lif(lif: snn.Leaky, currents_TBC: torch.Tensor) -> torch.Tensor:
 class SpikingConvPath(nn.Module):
     """Two (Conv1d over time -> GroupNorm -> LIF) stages: [T, B, C_in] -> [T, B, C].
 
-    spiking=False replaces each LIF with a ReLU (ANN twin).
+    spiking=False replaces each LIF with a ReLU (ANN twin); gn_groups=0 drops the GroupNorm.
     """
 
     def __init__(self, in_ch: int, ch: int, k1: int, k2: int, gn_groups: int, beta: float, spiking: bool = True):
         super().__init__()
+        norm = (lambda: nn.GroupNorm(gn_groups, ch)) if gn_groups > 0 else nn.Identity  # gn_groups=0: no norm
         self.conv1 = nn.Conv1d(in_ch, ch, k1, padding=k1 // 2)
-        self.gn1 = nn.GroupNorm(gn_groups, ch)
+        self.gn1 = norm()
         self.lif1 = _lif(beta) if spiking else nn.ReLU()
         self.conv2 = nn.Conv1d(ch, ch, k2, padding=k2 // 2)
-        self.gn2 = nn.GroupNorm(gn_groups, ch)
+        self.gn2 = norm()
         self.lif2 = _lif(beta) if spiking else nn.ReLU()
 
     @staticmethod
@@ -104,7 +105,8 @@ class SCNN(nn.Module):
         })
         in_ch = {"ttfs": n_channels * e.ttfs_segments, "lc": n_channels, "fs1": n_fs1}
         self.paths = nn.ModuleDict({
-            p: SpikingConvPath(in_ch[p], m.conv_channels, m.kernel1, m.kernel2, m.gn_groups, m.beta, s) for p in PATHS
+            p: SpikingConvPath(in_ch[p], m.conv_channels, m.kernel1, m.kernel2, m.gn_groups if m.norm == "group" else 0, m.beta, s)
+            for p in PATHS
         })
         self.heads = nn.ModuleDict({p: SpikingLinear(m.conv_channels, m.head_dim, m.beta, spiking=s) for p in PATHS})
         self.hidden = SpikingLinear(len(PATHS) * m.head_dim, m.hidden_dim, m.beta, spiking=s)

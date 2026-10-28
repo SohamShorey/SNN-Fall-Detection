@@ -4,7 +4,8 @@
     python scripts/compare.py runs/A runs/B ...     # selected runs
 
 Writes runs/comparison.csv and prints a table per task. Energy is per inference
-(compute only); for the classical models the feature-extraction cost is listed separately.
+(compute only). feature_energy_nj is the cost of the model's input representation: window
+statistics for the classical models, spike encoding for the networks; total_energy_nj adds both.
 """
 import argparse
 import json
@@ -41,7 +42,7 @@ def rows_for_run(run: Path) -> list[dict]:
              "mac": eff.get("snn_dense_mac") if spiking else eff.get("ann_synaptic_mac", 0) + eff.get("ann_dense_mac", 0),
              "ac_or_cmp": eff.get("snn_synaptic_ac") if spiking else eff.get("ann_dense_ac"),
              "energy_nj": eff.get("snn_total_energy_nj") if spiking else eff.get("ann_total_energy_nj"),
-             "feature_energy_nj": None}]
+             "feature_energy_nj": eff.get("encoding_energy_nj")}]
 
 
 if __name__ == "__main__":
@@ -57,9 +58,11 @@ if __name__ == "__main__":
             except KeyError as e:  # older metrics.json formats
                 print(f"Skipping {r.name}: missing {e}")
     df = pd.DataFrame(rows)
+    df["total_energy_nj"] = df["energy_nj"] + df["feature_energy_nj"]
     df.to_csv(Path("runs") / "comparison.csv", index=False)
     cols = ["model", "test_f1", "test_precision", "test_recall", "test_auc", "aligned_f1",
-            "min_fall_score_1to3s", "parameters", "mac", "ac_or_cmp", "energy_nj", "feature_energy_nj", "run"]
+            "min_fall_score_1to3s", "parameters", "mac", "ac_or_cmp", "energy_nj", "feature_energy_nj",
+            "total_energy_nj", "run"]
     for task, g in df.groupby("task"):
         print(f"\n=== {task}  (test subjects; F1 = macro-F1 for multi-class) ===")
         with pd.option_context("display.float_format", "{:.4g}".format, "display.width", 250):

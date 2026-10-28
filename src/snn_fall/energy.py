@@ -10,8 +10,10 @@ evaluated over the same t_max positions, so every weight is used at every positi
 multiply-accumulates (MAC) equal to the dense count of each layer.
 
 Energy = ops x energy-per-op (default: 45 nm CMOS, 32-bit float, Horowitz, ISSCC 2014:
-MAC 4.6 pJ, AC 0.9 pJ). Memory access, encoding and control overheads are not modelled,
-so the figures are a first-order, hardware-agnostic comparison, as is common in SNN papers.
+MAC 4.6 pJ, AC 0.9 pJ; comparisons are charged as AC). The cost of encoding a window into
+spikes is estimated separately (encoding_energy_nj). Memory access and control overheads are
+not modelled, so the figures are a first-order, hardware-agnostic comparison, as is common in
+SNN papers.
 """
 from __future__ import annotations
 
@@ -37,6 +39,26 @@ def _dense_conv_pairs(conv: nn.Conv1d, T: int, device) -> float:
     return _conv_pairs(torch.ones(T, 1, conv.in_channels, device=device), conv).item()
 
 
+def _has_gn(model: SCNN) -> bool:
+    return isinstance(model.paths[PATHS[0]].gn1, nn.GroupNorm)
+
+
+def encoding_cost(window_len: int, channels: int, n_fs1: int, segments: int, cfg_energy: EnergyConfig) -> dict:
+    """Approximate operations to turn one raw window into the three spike trains.
+
+    FS1 statistics: mean/variance accumulations (MAC) and running max/min (compare) per sample
+    and channel; segmented TTFS: running max per sample and channel; level crossing: one
+    subtraction (AC) and one threshold compare per sample and channel; TTFS time conversion:
+    one MAC per encoded value.
+    """
+    L, C = window_len, channels
+    mac = 2 * L * C + segments * C + n_fs1
+    ac = L * C
+    cmp = 2 * L * C + L * C + L * C
+    return {"mac": mac, "ac": ac, "comparisons": cmp,
+            "energy_nj": (mac * cfg_energy.e_mac_pj + (ac + cmp) * cfg_energy.e_ac_pj) / 1e3}
+
+
 class _Tally:
     def __init__(self):
         self.layers: dict[str, dict[str, float]] = {}
@@ -47,27 +69,31 @@ class _Tally:
             row[k] = row.get(k, 0.0) + float(v)
 
 
-def count_dense_operations(model: SCNN, device: torch.device, cfg_energy: EnergyConfig) -> dict:
+def count_dense_operations(model: SCNN, device: torch.device, cfg_energy: EnergyConfig,
+                           encoding: dict | None = None) -> dict:
     """Operations and energy per inference of the ANN twin (every weight used at every position)."""
     T = model.encoders["ttfs"].t_max
+    gn_per = GN_MACS_PER_ELEMENT if _has_gn(model) else 0
     mac, gn, units = 0.0, 0.0, 0.0
     for p in PATHS:
         for conv in (model.paths[p].conv1, model.paths[p].conv2):
             mac += _dense_conv_pairs(conv, T, device) * conv.out_channels
-            gn += GN_MACS_PER_ELEMENT * conv.out_channels * T
+            gn += gn_per * conv.out_channels * T
             units += conv.out_channels * T
     for fc in [model.heads[p].fc for p in PATHS] + [model.hidden.fc, model.out.fc]:
         mac += fc.in_features * fc.out_features * T
         units += fc.out_features * T
     e_mac, e_ac = cfg_energy.e_mac_pj, cfg_energy.e_ac_pj
     return {
-        "assumptions": {"e_mac_pj": e_mac, "e_ac_pj": e_ac, "t_max": T, "gn_macs_per_element": GN_MACS_PER_ELEMENT,
-                        "excluded": "memory access, spike encoding, GroupNorm statistics, ReLU, control logic"},
+        "assumptions": {"e_mac_pj": e_mac, "e_ac_pj": e_ac, "t_max": T, "gn_macs_per_element": gn_per,
+                        "excluded": "memory access, GroupNorm statistics, ReLU, control logic"},
         "per_inference": {
             "ann_synaptic_mac": mac, "ann_dense_mac": gn, "ann_dense_ac": units,
             "ann_synaptic_energy_nj": mac * e_mac / 1e3,
             "ann_total_energy_nj": ((mac + gn) * e_mac + units * e_ac) / 1e3,
+            "encoding_energy_nj": encoding["energy_nj"] if encoding else None,
         },
+        "encoding": encoding,
     }
 
 
@@ -75,8 +101,11 @@ def count_dense_operations(model: SCNN, device: torch.device, cfg_energy: Energy
 def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: EnergyConfig) -> dict:
     """Average spikes, operations and energy per inference over ``loader`` for the SNN and
     the architecture-matched ANN (dense counts only, if ``model`` is the ANN twin)."""
+    x0, fs0, _ = next(iter(loader))
+    enc = encoding_cost(x0.shape[1], x0.shape[2], fs0.shape[1], model.encoders["ttfs"].num_segments, cfg_energy)
     if not model.spiking:
-        return count_dense_operations(model, device, cfg_energy)
+        return count_dense_operations(model, device, cfg_energy, enc)
+    gn_per = GN_MACS_PER_ELEMENT if _has_gn(model) else 0
     model.eval()
     snn, n = _Tally(), 0
     for x, fs1, _ in loader:
@@ -118,7 +147,7 @@ def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: Ener
         units = avg["neurons"]                                         # neuron-timesteps per inference
         if isinstance(module, nn.Conv1d):
             ann_mac = _dense_conv_pairs(module, T, device) * module.out_channels
-            gn = GN_MACS_PER_ELEMENT * units
+            gn = gn_per * units
         else:
             ann_mac = module.in_features * module.out_features * T
             gn = 0.0
@@ -144,8 +173,9 @@ def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: Ener
     return {
         "assumptions": {
             "e_mac_pj": e_mac, "e_ac_pj": e_ac, "t_max": T,
-            "gn_macs_per_element": GN_MACS_PER_ELEMENT, "lif_macs_per_update": LIF_MACS_PER_UPDATE,
-            "excluded": "memory access, spike encoding, GroupNorm statistics, control logic",
+            "gn_macs_per_element": gn_per, "lif_macs_per_update": LIF_MACS_PER_UPDATE,
+            "excluded": "memory access, GroupNorm statistics, control logic",
+            "encoding": "counted separately (encoding_energy_nj); identical for the SNN and the matched ANN",
             "ann": "same layers and shapes, real-valued activations, evaluated at all t_max positions",
         },
         "per_inference": {
@@ -158,7 +188,9 @@ def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: Ener
             "ann_total_energy_nj": ann_total_nj,
             "synaptic_energy_ratio_ann_over_snn": ann_syn_nj / snn_syn_nj if snn_syn_nj else float("inf"),
             "total_energy_ratio_ann_over_snn": ann_total_nj / snn_total_nj,
+            "encoding_energy_nj": enc["energy_nj"],
         },
+        "encoding": enc,
         "per_layer": layers,
         "inferences": n,
     }

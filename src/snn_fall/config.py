@@ -53,6 +53,7 @@ class ModelConfig:
     kernel1: int = 5
     kernel2: int = 3
     gn_groups: int = 4
+    norm: str = "group"  # group (GroupNorm after each conv) | none
     head_dim: int = 64
     hidden_dim: int = 128
     beta: float = 0.9
@@ -232,7 +233,8 @@ def validate(cfg: Config) -> None:
     check(e.ttfs_reduce in ("max", "mean"), "encoding.ttfs_reduce must be 'max' or 'mean'.")
     check(m.kernel1 % 2 == 1 and m.kernel2 % 2 == 1,
           "model.kernel1 / model.kernel2 must be odd so the conv output keeps t_max time steps.")
-    check(m.conv_channels % m.gn_groups == 0,
+    check(m.norm in ("group", "none"), "model.norm must be 'group' or 'none'.")
+    check(m.norm == "none" or (m.gn_groups > 0 and m.conv_channels % m.gn_groups == 0),
           f"model.conv_channels ({m.conv_channels}) must be divisible by model.gn_groups ({m.gn_groups}).")
     check(0 < m.beta <= 1, "model.beta must be in (0, 1].")
     check(m.kind in ("scnn", "ann"), "model.kind must be 'scnn' or 'ann'.")

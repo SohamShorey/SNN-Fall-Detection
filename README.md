@@ -13,6 +13,10 @@ The same architecture is also trained as a second stage that names the **directi
 detected fall (forward / backward / lateral / vertical). The two models are trained and saved
 separately.
 
+> **Status:** work in progress. The tables in [results/](results/tables.md) are preliminary
+> (single subject split, single seed); SNN efficiency variants and the encoding-stream ablation
+> are still being run and will be added.
+
 ## Layout
 
 ```
@@ -47,8 +51,15 @@ scripts/
 pip install -r requirements.txt
 ```
 
-Download SisFall and place it so that recordings live at `data/SisFall_dataset/SA01/D01_SA01_R01.txt`, etc.
-Run all commands from the repository root.
+### Data
+
+This repository does not include the dataset. Obtain **SisFall** from its authors and place it
+so that recordings live at `data/SisFall_dataset/SA01/D01_SA01_R01.txt`, etc.:
+
+> A. Sucerquia, J. D. López, J. F. Vargas-Bonilla, "SisFall: A Fall and Movement Dataset,"
+> *Sensors*, vol. 17, no. 1, p. 198, 2017. doi:10.3390/s17010198
+
+Use of the data is subject to the dataset authors' terms. Run all commands from the repository root.
 
 ## Usage
 

@@ -52,14 +52,14 @@ def plot_threshold_sweep(sweep: pd.DataFrame, chosen: float, out_path: Path) -> 
     plt.close(fig)
 
 
-def plot_recall_by_offset(recall: dict[str, float], train_range: list[float] | None, out_path: Path) -> None:
-    offsets = [float(k) for k in recall]
+def plot_by_offset(score: dict[str, float], train_range: list[float] | None, ylabel: str, out_path: Path) -> None:
+    offsets = [float(k) for k in score]
     fig, ax = plt.subplots(figsize=(6, 3.5))
     if train_range:
         ax.axvspan(*train_range, color="0.9", label="Training impact range")
-    ax.plot(offsets, list(recall.values()), "o-")
-    ax.set_xlabel("Impact position in 4 s window (s)")
-    ax.set_ylabel("Fall recall (test)")
+    ax.plot(offsets, list(score.values()), "o-")
+    ax.set_xlabel("Impact position in window (s)")
+    ax.set_ylabel(ylabel)
     ax.set_ylim(-0.02, 1.02)
     ax.grid(True, alpha=0.3)
     if train_range:
@@ -69,10 +69,10 @@ def plot_recall_by_offset(recall: dict[str, float], train_range: list[float] | N
     plt.close(fig)
 
 
-def plot_confusion(metrics: dict, title: str, out_path: Path) -> None:
-    cm = np.array([[metrics["tn"], metrics["fp"]], [metrics["fn"], metrics["tp"]]])
-    fig, ax = plt.subplots(figsize=(4.5, 4))
-    ConfusionMatrixDisplay(cm, display_labels=["ADL", "Fall"]).plot(cmap="Reds", ax=ax, colorbar=False)
+def plot_confusion(cm: np.ndarray, labels: list[str], title: str, out_path: Path) -> None:
+    size = 3 + 0.6 * len(labels)
+    fig, ax = plt.subplots(figsize=(size + 0.5, size))
+    ConfusionMatrixDisplay(cm, display_labels=labels).plot(cmap="Reds", ax=ax, colorbar=False)
     ax.set_title(title)
     fig.tight_layout()
     fig.savefig(out_path, dpi=200)

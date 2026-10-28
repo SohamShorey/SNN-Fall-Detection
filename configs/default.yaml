@@ -5,6 +5,9 @@
 seed: 42
 output_dir: runs
 
+task:
+  kind: binary                    # binary (ADL vs fall) | fall_category (see configs/fall_direction.yaml)
+
 data:
   raw_dir: data/SisFall_dataset
   cache_path: data/processed/sisfall_4s.npz

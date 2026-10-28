@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from .config import Config
 from .data import FallDataset, shifted_eval_set
-from .evaluate import compute_metrics
+from .evaluate import summary_metrics
 from .model import SCNN
 
 LOG_COLUMNS = ["epoch", "lr", "train_loss", "train_acc", "val_loss", "val_acc",
@@ -101,7 +101,7 @@ def logits_from_outputs(spk_out: torch.Tensor, mem_out: torch.Tensor, cfg: Confi
 @torch.no_grad()
 def predict(model: SCNN, loader: DataLoader, device: torch.device, cfg: Config,
             criterion: nn.Module | None = None):
-    """Returns (y_true, P(fall), mean loss or nan)."""
+    """Returns (y_true, class probabilities [N, classes], mean loss or nan)."""
     model.eval()
     ys, probs, loss_sum = [], [], 0.0
     for x, fs1, y in loader:
@@ -109,14 +109,15 @@ def predict(model: SCNN, loader: DataLoader, device: torch.device, cfg: Config,
         spk_out, mem_out = model(x, fs1)
         if criterion is not None:
             loss_sum += criterion(spk_out, mem_out, y).item() * len(y)
-        probs.append(F.softmax(logits_from_outputs(spk_out, mem_out, cfg), dim=1)[:, 1].cpu())
+        probs.append(F.softmax(logits_from_outputs(spk_out, mem_out, cfg), dim=1).cpu())
         ys.append(y.cpu())
     y_true, prob = torch.cat(ys).numpy(), torch.cat(probs).numpy()
     return y_true, prob, (loss_sum / len(y_true) if criterion is not None else float("nan"))
 
 
 def fit(model: SCNN, loaders: dict, cfg: Config, device: torch.device, run_dir: Path) -> dict:
-    """Train with early stopping on validation F1; the best checkpoint goes to run_dir/best.pt."""
+    """Train with early stopping on validation F1 (macro-F1 for fall categories);
+    the best checkpoint goes to run_dir/best.pt."""
     t = cfg.train
     criterion = SpikingLoss(cfg)
     optimizer = make_optimizer(model, cfg)
@@ -148,7 +149,7 @@ def fit(model: SCNN, loaders: dict, cfg: Config, device: torch.device, run_dir: 
             pbar.set_postfix(loss=f"{loss_sum / seen:.4f}", acc=f"{correct / seen:.3f}")
 
         y_val, p_val, val_loss = predict(model, loaders["val"], device, cfg, criterion)
-        m = compute_metrics(y_val, p_val, threshold=0.5)
+        m = summary_metrics(y_val, p_val, cfg.task.class_names)
         lr = optimizer.param_groups[0]["lr"]
         row = [epoch, lr, loss_sum / seen, correct / seen, val_loss,
                m["accuracy"], m["precision"], m["recall"], m["f1"], m["auc"]]

@@ -103,9 +103,22 @@ class EvalConfig:
 
 
 @dataclass
+class TaskConfig:
+    # binary:        ADL vs fall (the fall detector).
+    # fall_category: fall windows only, labelled by the groups in fall_groups (ADLs dropped).
+    kind: str = "binary"
+    fall_groups: dict[str, list[str]] | None = None  # class name -> SisFall fall codes
+
+    @property
+    def class_names(self) -> list[str]:
+        return ["ADL", "Fall"] if self.kind == "binary" else list(self.fall_groups)
+
+
+@dataclass
 class Config:
     seed: int = 42
     output_dir: str = "runs"
+    task: TaskConfig = field(default_factory=TaskConfig)
     data: DataConfig = field(default_factory=DataConfig)
     encoding: EncodingConfig = field(default_factory=EncodingConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
@@ -158,7 +171,7 @@ def _build(cls, raw: dict):
     kwargs = {}
     for name, value in raw.items():
         sub = {"data": DataConfig, "encoding": EncodingConfig, "model": ModelConfig,
-               "stdp": STDPConfig, "train": TrainConfig, "eval": EvalConfig}.get(name) if cls is Config else None
+               "stdp": STDPConfig, "train": TrainConfig, "eval": EvalConfig, "task": TaskConfig}.get(name) if cls is Config else None
         kwargs[name] = _build(sub, value) if sub is not None else value
     return cls(**kwargs)
 
@@ -189,6 +202,17 @@ def validate(cfg: Config) -> None:
     check(all(0 <= o < W for o in ev.fall_offsets_s or []),
           f"eval.fall_offsets_s values must be in [0, data.window_s={W}).")
     check(ev.threshold_metric in ("f1", "accuracy"), "eval.threshold_metric must be 'f1' or 'accuracy'.")
+
+    tk = cfg.task
+    check(tk.kind in ("binary", "fall_category"), "task.kind must be 'binary' or 'fall_category'.")
+    if tk.kind == "fall_category":
+        groups = tk.fall_groups or {}
+        codes = [c for cs in groups.values() for c in cs]
+        valid = {f"F{i:02d}" for i in range(1, 16)}
+        check(len(groups) >= 2, "task.fall_groups needs at least two classes for task.kind=fall_category.")
+        check(all(c in valid for c in codes), f"task.fall_groups codes must be SisFall fall codes F01-F15, "
+                                              f"got {sorted(set(codes) - valid)}.")
+        check(len(codes) == len(set(codes)), "Each fall code may appear in only one task.fall_groups class.")
 
     L = d.window_len
     check(e.t_max >= 1 and (L - 1) // e.t_max >= 1,

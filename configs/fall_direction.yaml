@@ -1,0 +1,14 @@
+# Second-stage model: classify the direction of a detected fall.
+# Same architecture and data pipeline as the binary detector (default.yaml), trained on fall
+# windows only. Fall codes not listed in fall_groups are left out.
+#   python scripts/train.py --config configs/fall_direction.yaml --name direction
+
+base: default.yaml
+
+task:
+  kind: fall_category
+  fall_groups:
+    forward:  [F01, F04, F05, F08, F10, F13]  # slip/trip while walking or jogging, getting up, sitting down, seated
+    backward: [F02, F11, F14]                 # slip while walking, sitting down, seated
+    lateral:  [F03, F09, F12, F15]            # slip while walking, getting up, sitting down, seated
+    vertical: [F06, F07]                      # fainting while walking (F07: dampened with hands on a table)

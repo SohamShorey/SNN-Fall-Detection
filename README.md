@@ -9,12 +9,17 @@ encoded three ways (Segmented TTFS, learnable Level-Crossing, and TTFS on FS1 st
 features); each spike train goes through its own STDP-pretrained spiking convolutional pathway,
 and the fused features feed a spiking fully connected classifier.
 
+The same architecture is also trained as a second stage that names the **direction** of a
+detected fall (forward / backward / lateral / vertical). The two models are trained and saved
+separately.
+
 ## Layout
 
 ```
 configs/
-  default.yaml      method as described in the paper (use for reported results)
-  legacy.yaml       reproduces the original scripts' data pipeline, for comparison only
+  default.yaml        binary fall detector (ADL vs fall), method as described in the paper
+  fall_direction.yaml second stage: fall direction from fall windows (same architecture)
+  legacy.yaml         reproduces the original scripts' data pipeline, for comparison only
 src/snn_fall/
   config.py         typed config, YAML loading, --set overrides
   data.py           SisFall parsing, high-pass filter, windowing, subject-wise split, z-scoring
@@ -47,8 +52,15 @@ python scripts/preprocess.py
 ```
 
 ```bash
-python scripts/train.py --name baseline
+python scripts/train.py --name detector
 ```
+
+```bash
+python scripts/train.py --config configs/fall_direction.yaml --name direction
+```
+
+The direction groups (which SisFall fall codes belong to which class) are listed in
+[configs/fall_direction.yaml](configs/fall_direction.yaml) and can be edited there.
 
 `train.py` builds the dataset cache automatically if it is missing, so `preprocess.py` is optional.
 Each combination of data settings gets its own cache file (`data/processed/sisfall_4s-<hash>.npz`). Any config value can be overridden:
@@ -70,6 +82,7 @@ earlier caches are kept, so switching back is instant.
 
 | To change | Edit | Keep consistent |
 |---|---|---|
+| Detector vs. fall-category model | `task.kind`, `task.fall_groups` | each fall code in at most one group |
 | Window length | `data.window_s` | `data.fall_pre_s`, `train.fall_shift_s` and `eval.fall_offsets_s` must be < `window_s` |
 | Where the impact sits in aligned fall windows | `data.fall_pre_s` | |
 | Random impact range during training | `train.fall_shift_s` (`null` = aligned only) | |
@@ -92,7 +105,10 @@ Each run writes to `runs/<timestamp>_<name>/`:
 | `train_log.csv`, `training_curves.png` | per-epoch train/val metrics |
 | `threshold_sweep_val.csv/.png` | decision-threshold sweep on the validation split |
 | `metrics.json`, `confusion_test.png` | val and **test** metrics at the threshold chosen on val: `test` (falls at every `eval.fall_offsets_s` position) and `test_aligned` (impact at `data.fall_pre_s`) |
-| `recall_by_offset_test.png` | test fall recall vs. where the impact sits in the window |
+| `by_offset_test.png` | share of test falls handled correctly (detector: detected; direction model: right class) vs. where the impact sits in the window |
+
+For the direction model, `metrics.json` holds accuracy, balanced accuracy, macro precision /
+recall / F1 / AUC, per-class scores and the confusion matrix; no threshold is tuned (argmax).
 
 ## Method summary
 
@@ -110,4 +126,4 @@ Each run writes to `runs/<timestamp>_<name>/`:
 | Training | AdamW (3e-4), CE on membrane with label smoothing 0.05, class-balanced sampling, Gaussian noise (σ = 0.01) augmentation, ReduceLROnPlateau on val F1, early stopping (patience 25) |
 | Evaluation | val/test falls evaluated with the impact at 1.0, 1.5, 2.0, 2.5 and 3.0 s; threshold maximising val F1, applied unchanged to the test subjects |
 
-The model has 49,736 trainable parameters.
+The detector has 49,736 trainable parameters; the 4-class direction model has 49,994.

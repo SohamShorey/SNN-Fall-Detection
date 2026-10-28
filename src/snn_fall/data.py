@@ -28,9 +28,10 @@ from sklearn.model_selection import train_test_split
 from torch.utils.data import Dataset
 from tqdm import tqdm
 
-from .config import DataConfig
+from .config import DataConfig, TaskConfig
 
 SPLITS = ("train", "val", "test")
+CACHE_FORMAT = 2  # bump when the cached arrays change so stale caches are rebuilt
 _FILE_RE = re.compile(r"^(?P<activity>[DF]\d{2})_(?P<subject>S[AE]\d{2})_(?P<trial>R\d{2})\.txt$")
 
 
@@ -128,7 +129,7 @@ def preprocess(cfg: DataConfig, seed: int) -> dict:
     groups = split_groups([r[cfg.split_by] for r in recs], cfg, seed)
     group_to_split = {g: s for s, gs in groups.items() for g in gs}
 
-    buf = {s: {"x": [], "fs1": [], "y": [], "subject": []} for s in SPLITS}
+    buf = {s: {"x": [], "fs1": [], "y": [], "subject": [], "activity": []} for s in SPLITS}
     ctx_buf = {s: {"ctx": [], "idx": [], "pre_min": [], "pre_max": []} for s in SPLITS}
     skipped = Counter()
     for rec in tqdm(recs, desc="Reading SisFall"):
@@ -155,6 +156,7 @@ def preprocess(cfg: DataConfig, seed: int) -> dict:
             b["fs1"].append(fs1_features(w))
             b["y"].append(int(is_fall))
             b["subject"].append(rec["subject"])
+            b["activity"].append(rec["activity"])
 
     arrays = {s: {k: np.asarray(v) for k, v in buf[s].items()} for s in SPLITS}
 
@@ -170,12 +172,14 @@ def preprocess(cfg: DataConfig, seed: int) -> dict:
         out[f"fs1_{s}"] = ((arrays[s]["fs1"] - f_mean) / f_std).astype(np.float32)
         out[f"y_{s}"] = arrays[s]["y"].astype(np.int64)
         out[f"subject_{s}"] = arrays[s]["subject"]
+        out[f"activity_{s}"] = arrays[s]["activity"]
         c = ctx_buf[s]
         out[f"ctx_{s}"] = ((np.asarray(c["ctx"]) - x_mean) / x_std).astype(np.float32)
         out[f"ctx_idx_{s}"] = np.asarray(c["idx"], dtype=np.int64)
         out[f"ctx_pre_min_{s}"] = np.asarray(c["pre_min"], dtype=np.int64)
         out[f"ctx_pre_max_{s}"] = np.asarray(c["pre_max"], dtype=np.int64)
     meta = {
+        "format": CACHE_FORMAT,
         "data_config": asdict(cfg),
         "seed": seed,
         "groups": groups,
@@ -212,18 +216,38 @@ def load_or_preprocess(cfg: DataConfig, seed: int) -> dict:
     if cache.exists():
         data = load_processed(cache)
         if (data["meta"]["data_config"] == asdict(cfg) and data["meta"]["seed"] == seed
-                and "ctx_train" in data):
+                and data["meta"].get("format") == CACHE_FORMAT):
             return data
         print(f"Cache {cache} does not match the current settings; rebuilding.")
     return preprocess(cfg, seed)
 
 
-def summarize(data: dict) -> str:
+def task_view(data: dict, task: TaskConfig) -> dict:
+    """Labels for the task. binary: unchanged (0 = ADL, 1 = fall). fall_category: keep only
+    falls whose code is in task.fall_groups and label them by group index."""
+    if task.kind == "binary":
+        return data
+    code_to_class = {code: i for i, codes in enumerate(task.fall_groups.values()) for code in codes}
+    out = {"meta": data["meta"]}
+    for s in SPLITS:
+        keep = np.isin(data[f"activity_{s}"], list(code_to_class))
+        new_index = np.cumsum(keep) - 1  # old window index -> index after filtering
+        for k in ("x", "fs1", "subject", "activity"):
+            out[f"{k}_{s}"] = data[f"{k}_{s}"][keep]
+        out[f"y_{s}"] = np.array([code_to_class[a] for a in out[f"activity_{s}"]], dtype=np.int64)
+        rows = keep[data[f"ctx_idx_{s}"]]
+        out[f"ctx_idx_{s}"] = new_index[data[f"ctx_idx_{s}"][rows]]
+        for k in ("ctx", "ctx_pre_min", "ctx_pre_max"):
+            out[f"{k}_{s}"] = data[f"{k}_{s}"][rows]
+    return out
+
+
+def summarize(data: dict, class_names: list[str]) -> str:
     lines = []
     for s in SPLITS:
         y = data[f"y_{s}"]
-        lines.append(f"{s:>5}: {len(y):5d} windows  ({int(y.sum()):4d} fall / {int((y == 0).sum()):5d} ADL)"
-                     f"  groups={data['meta']['groups'][s]}")
+        counts = " / ".join(f"{int((y == i).sum())} {name}" for i, name in enumerate(class_names))
+        lines.append(f"{s:>5}: {len(y):5d} windows  ({counts})  groups={data['meta']['groups'][s]}")
     return "\n".join(lines)
 
 
@@ -239,23 +263,26 @@ def window_from_context(data: dict, split: str, row: int, pre: int) -> tuple[np.
 
 
 def shifted_eval_set(data: dict, split: str, offsets_s: list[float], sample_rate: int) -> dict:
-    """ADL windows unchanged plus every fall re-cut with its impact at each offset (seconds).
+    """Non-fall windows unchanged plus every fall re-cut with its impact at each offset (seconds).
 
-    (fall, offset) pairs whose window would leave the recording are skipped.
-    Returns arrays x, fs1, y and offset_s (NaN for ADL windows).
+    (fall, offset) pairs whose window would leave the recording are skipped. Falls keep
+    their label. Returns arrays x, fs1, y and offset_s (NaN for non-fall windows).
     """
-    adl = data[f"y_{split}"] == 0
-    xs, fs, offs = [data[f"x_{split}"][adl]], [data[f"fs1_{split}"][adl]], [np.full(adl.sum(), np.nan)]
-    for row in range(len(data[f"ctx_idx_{split}"])):
+    y = data[f"y_{split}"]
+    ctx_idx = data[f"ctx_idx_{split}"]
+    other = np.ones(len(y), dtype=bool)
+    other[ctx_idx] = False
+    xs, fs, ys = [data[f"x_{split}"][other]], [data[f"fs1_{split}"][other]], [y[other]]
+    offs = [np.full(other.sum(), np.nan)]
+    for row, idx in enumerate(ctx_idx):
         lo, hi = data[f"ctx_pre_min_{split}"][row], data[f"ctx_pre_max_{split}"][row]
         for off in offsets_s:
             pre = int(round(off * sample_rate))
             if lo <= pre <= hi:
                 w, f = window_from_context(data, split, row, pre)
-                xs.append(w[None]); fs.append(f[None]); offs.append([off])
-    offset = np.concatenate(offs)
+                xs.append(w[None]); fs.append(f[None]); ys.append([y[idx]]); offs.append([off])
     return {"x": np.concatenate(xs).astype(np.float32), "fs1": np.concatenate(fs).astype(np.float32),
-            "y": (~np.isnan(offset)).astype(np.int64), "offset_s": offset}
+            "y": np.concatenate(ys).astype(np.int64), "offset_s": np.concatenate(offs)}
 
 
 class FallDataset(Dataset):

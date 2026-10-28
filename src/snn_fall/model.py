@@ -103,24 +103,29 @@ class SCNN(nn.Module):
             "lc": LearnableLevelCrossingEncoder(n_channels, e.t_max, e.lc_init_threshold, e.lc_surrogate_slope),
             "fs1": FS1TTFSEncoder(e.t_max, e.fs1_threshold),
         })
+        # active pathways (model.paths); a subset gives the encoding-stream ablations
+        self.path_names = tuple(p for p in PATHS if p in m.paths)
+        if "lc" not in self.path_names:
+            self.encoders["lc"].threshold.requires_grad_(False)  # unused: not trained or counted
         in_ch = {"ttfs": n_channels * e.ttfs_segments, "lc": n_channels, "fs1": n_fs1}
         self.paths = nn.ModuleDict({
             p: SpikingConvPath(in_ch[p], m.conv_channels, m.kernel1, m.kernel2, m.gn_groups if m.norm == "group" else 0, m.beta, s)
-            for p in PATHS
+            for p in self.path_names
         })
-        self.heads = nn.ModuleDict({p: SpikingLinear(m.conv_channels, m.head_dim, m.beta, spiking=s) for p in PATHS})
-        self.hidden = SpikingLinear(len(PATHS) * m.head_dim, m.hidden_dim, m.beta, spiking=s)
+        self.heads = nn.ModuleDict({p: SpikingLinear(m.conv_channels, m.head_dim, m.beta, spiking=s)
+                                    for p in self.path_names})
+        self.hidden = SpikingLinear(len(self.path_names) * m.head_dim, m.hidden_dim, m.beta, spiking=s)
         self.out = SpikingLinear(m.hidden_dim, num_classes, m.beta, output=True, spiking=s)
 
     def encode(self, x: torch.Tensor, fs1: torch.Tensor) -> dict[str, torch.Tensor]:
-        """Raw window [B, L, C] and FS1 features [B, F] -> spike trains per pathway."""
-        return {"ttfs": self.encoders["ttfs"](x), "lc": self.encoders["lc"](x), "fs1": self.encoders["fs1"](fs1)}
+        """Raw window [B, L, C] and FS1 features [B, F] -> spike trains per active pathway."""
+        return {p: self.encoders[p](fs1 if p == "fs1" else x) for p in self.path_names}
 
     def forward(self, x: torch.Tensor, fs1: torch.Tensor):
         """Returns (output spikes [T, B, classes], final output membrane [B, classes]);
         for the ANN twin, (output activations [T, B, classes], their time average)."""
         spikes = self.encode(x, fs1)
-        fused = torch.cat([self.heads[p](self.paths[p](spikes[p]))[0] for p in PATHS], dim=2)
+        fused = torch.cat([self.heads[p](self.paths[p](spikes[p]))[0] for p in self.path_names], dim=2)
         hidden, _ = self.hidden(fused)
         spk_out, mem_out = self.out(hidden)
         return spk_out, mem_out

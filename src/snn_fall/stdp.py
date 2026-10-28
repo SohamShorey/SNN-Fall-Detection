@@ -16,7 +16,7 @@ import torch.nn.functional as F
 from tqdm import tqdm
 
 from .config import STDPConfig
-from .model import PATHS, SCNN
+from .model import SCNN
 
 
 class STDPTrainer:
@@ -53,7 +53,7 @@ class STDPTrainer:
         for epoch in range(self.cfg.epochs):
             for x, fs1, _ in tqdm(loader, desc=f"STDP {epoch + 1}/{self.cfg.epochs}", leave=False):
                 spikes = self.model.encode(x.to(device), fs1.to(device))
-                for p in PATHS:
+                for p in self.model.path_names:
                     path = self.model.paths[p]
                     rel1 = self.update(path.conv1, spikes[p], "conv1")
                     # conv2's presynaptic spikes come from the freshly updated first stage

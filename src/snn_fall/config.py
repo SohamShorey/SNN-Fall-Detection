@@ -54,6 +54,7 @@ class ModelConfig:
     kernel2: int = 3
     gn_groups: int = 4
     norm: str = "group"  # group (GroupNorm after each conv) | none
+    paths: list[str] = field(default_factory=lambda: ["ttfs", "lc", "fs1"])  # active encoding pathways
     head_dim: int = 64
     hidden_dim: int = 128
     beta: float = 0.9
@@ -234,6 +235,8 @@ def validate(cfg: Config) -> None:
     check(m.kernel1 % 2 == 1 and m.kernel2 % 2 == 1,
           "model.kernel1 / model.kernel2 must be odd so the conv output keeps t_max time steps.")
     check(m.norm in ("group", "none"), "model.norm must be 'group' or 'none'.")
+    check(len(m.paths) >= 1 and set(m.paths) <= {"ttfs", "lc", "fs1"} and len(set(m.paths)) == len(m.paths),
+          "model.paths must be a non-empty list of distinct pathways from: ttfs, lc, fs1.")
     check(m.norm == "none" or (m.gn_groups > 0 and m.conv_channels % m.gn_groups == 0),
           f"model.conv_channels ({m.conv_channels}) must be divisible by model.gn_groups ({m.gn_groups}).")
     check(0 < m.beta <= 1, "model.beta must be in (0, 1].")

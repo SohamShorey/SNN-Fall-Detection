@@ -22,7 +22,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .config import EnergyConfig
-from .model import PATHS, SCNN, run_lif
+from .model import SCNN, run_lif
 
 GN_MACS_PER_ELEMENT = 2  # normalise (subtract mean, scale) + affine; statistics are not counted
 LIF_MACS_PER_UPDATE = 1  # mem = beta * mem + input
@@ -40,11 +40,12 @@ def _dense_conv_pairs(conv: nn.Conv1d, T: int, device) -> float:
 
 
 def _has_gn(model: SCNN) -> bool:
-    return isinstance(model.paths[PATHS[0]].gn1, nn.GroupNorm)
+    return isinstance(model.paths[model.path_names[0]].gn1, nn.GroupNorm)
 
 
-def encoding_cost(window_len: int, channels: int, n_fs1: int, segments: int, cfg_energy: EnergyConfig) -> dict:
-    """Approximate operations to turn one raw window into the three spike trains.
+def encoding_cost(window_len: int, channels: int, n_fs1: int, segments: int, cfg_energy: EnergyConfig,
+                  paths: tuple[str, ...] = ("ttfs", "lc", "fs1")) -> dict:
+    """Approximate operations to turn one raw window into the spike trains of the active pathways.
 
     FS1 statistics: mean/variance accumulations (MAC) and running max/min (compare) per sample
     and channel; segmented TTFS: running max per sample and channel; level crossing: one
@@ -52,9 +53,16 @@ def encoding_cost(window_len: int, channels: int, n_fs1: int, segments: int, cfg
     one MAC per encoded value.
     """
     L, C = window_len, channels
-    mac = 2 * L * C + segments * C + n_fs1
-    ac = L * C
-    cmp = 2 * L * C + L * C + L * C
+    mac = ac = cmp = 0
+    if "fs1" in paths:
+        mac += 2 * L * C + n_fs1
+        cmp += 2 * L * C
+    if "ttfs" in paths:
+        mac += segments * C
+        cmp += L * C
+    if "lc" in paths:
+        ac += L * C
+        cmp += L * C
     return {"mac": mac, "ac": ac, "comparisons": cmp,
             "energy_nj": (mac * cfg_energy.e_mac_pj + (ac + cmp) * cfg_energy.e_ac_pj) / 1e3}
 
@@ -75,12 +83,12 @@ def count_dense_operations(model: SCNN, device: torch.device, cfg_energy: Energy
     T = model.encoders["ttfs"].t_max
     gn_per = GN_MACS_PER_ELEMENT if _has_gn(model) else 0
     mac, gn, units = 0.0, 0.0, 0.0
-    for p in PATHS:
+    for p in model.path_names:
         for conv in (model.paths[p].conv1, model.paths[p].conv2):
             mac += _dense_conv_pairs(conv, T, device) * conv.out_channels
             gn += gn_per * conv.out_channels * T
             units += conv.out_channels * T
-    for fc in [model.heads[p].fc for p in PATHS] + [model.hidden.fc, model.out.fc]:
+    for fc in [model.heads[p].fc for p in model.path_names] + [model.hidden.fc, model.out.fc]:
         mac += fc.in_features * fc.out_features * T
         units += fc.out_features * T
     e_mac, e_ac = cfg_energy.e_mac_pj, cfg_energy.e_ac_pj
@@ -102,7 +110,8 @@ def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: Ener
     """Average spikes, operations and energy per inference over ``loader`` for the SNN and
     the architecture-matched ANN (dense counts only, if ``model`` is the ANN twin)."""
     x0, fs0, _ = next(iter(loader))
-    enc = encoding_cost(x0.shape[1], x0.shape[2], fs0.shape[1], model.encoders["ttfs"].num_segments, cfg_energy)
+    enc = encoding_cost(x0.shape[1], x0.shape[2], fs0.shape[1], model.encoders["ttfs"].num_segments, cfg_energy,
+                        model.path_names)
     if not model.spiking:
         return count_dense_operations(model, device, cfg_energy, enc)
     gn_per = GN_MACS_PER_ELEMENT if _has_gn(model) else 0
@@ -114,7 +123,7 @@ def count_operations(model: SCNN, loader, device: torch.device, cfg_energy: Ener
         n += B
         spikes = model.encode(x, fs1)
         heads = []
-        for p in PATHS:
+        for p in model.path_names:
             path = model.paths[p]
             s0 = spikes[p]
             snn.add(f"input.{p}", spikes=(s0 > 0.5).sum())

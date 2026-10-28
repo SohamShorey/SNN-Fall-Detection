@@ -38,6 +38,7 @@ scripts/
   evaluate.py       re-evaluate an existing run directory
   baselines.py      run the threshold / classical ML baselines
   compare.py        comparison table across runs
+  paper_tables.py   paper-ready result tables (CSV, Markdown, LaTeX) in results/
 ```
 
 ## Setup
@@ -87,6 +88,12 @@ python scripts/compare.py
   for fall direction, a nearest-centroid rule on the impact direction; plus RBF-SVM, Random Forest
   and k-NN on window statistics. Thresholds and hyper-parameters are chosen on the validation
   subjects. Training falls are re-cut at 5 impact positions over `train.fall_shift_s`.
+- **Encoding-stream ablation**: `--set "model.paths=[ttfs,lc]"` builds the network with only the
+  listed pathways (any non-empty subset of `ttfs`, `lc`, `fs1`); STDP, energy and encoding cost
+  cover only those pathways.
+- **`paper_tables.py`** compiles every finished run into `results/all_results.csv`,
+  `results/tables.md` and `results/tables.tex` (booktabs): fall detection, fall direction, SNN
+  efficiency variants and the encoding-stream ablation.
 - **`compare.py`** gathers every run's test metrics, parameters, operations and estimated energy
   into `runs/comparison.csv` and prints one table per task.
 

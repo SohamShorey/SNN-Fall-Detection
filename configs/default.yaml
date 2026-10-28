@@ -41,6 +41,7 @@ model:
   kernel2: 3
   gn_groups: 4
   norm: group                     # group (GroupNorm after each conv) | none
+  paths: [ttfs, lc, fs1]          # active encoding pathways; a subset = encoding ablation
   head_dim: 64
   hidden_dim: 128
   beta: 0.9                       # LIF membrane decay

@@ -1,0 +1,23 @@
+# Reproduces the data pipeline of the original scripts (SisFall 4s FINAL.py + MEMLOSS_FINAL.py)
+# for comparison only. Do NOT use for reported results: `split_by: activity` lets the same
+# subjects appear in train, val and test.
+#   python scripts/preprocess.py --config configs/legacy.yaml
+#   python scripts/train.py --config configs/legacy.yaml
+
+base: default.yaml
+
+data:
+  cache_path: data/processed/sisfall_4s_legacy.npz
+  sensor_cols: [0, 1, 2, 6, 7, 8]   # two accelerometers, no gyroscope
+  split_by: activity
+  highpass_causal: false            # original used zero-phase filtfilt
+
+encoding:
+  ttfs_reduce: mean
+
+train:
+  noise_std: 0.0
+  fall_shift_s: null
+
+eval:
+  fall_offsets_s: null              # aligned windows only, as in the original scripts

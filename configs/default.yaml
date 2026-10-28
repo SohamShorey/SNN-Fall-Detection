@@ -1,0 +1,76 @@
+# Default configuration: follows the method described in the ISCAS 2027 manuscript.
+# Any value can be overridden from the command line, e.g.
+#   python scripts/train.py --set train.epochs=50 --set seed=1
+
+seed: 42
+output_dir: runs
+
+data:
+  raw_dir: data/SisFall_dataset
+  cache_path: data/processed/sisfall_4s.npz
+  subject_prefixes: [SA]          # SA = young adults; add SE to include elderly subjects
+  sample_rate: 200                # Hz
+  # SisFall columns: 0-2 ADXL345 accel, 3-5 ITG3200 gyro, 6-8 MMA8451Q accel
+  sensor_cols: [0, 1, 2, 3, 4, 5] # accelerometer + gyroscope
+  peak_cols: [0, 1, 2]            # columns used to locate the fall impact peak
+  window_s: 4.0
+  fall_pre_s: 3.0                 # fall windows: peak sits 3 s after window start
+  highpass_hz: 0.4
+  highpass_order: 4
+  highpass_causal: true           # forward-only filter, realisable on-device; false = zero-phase
+  split_by: subject               # subject | activity (activity reproduces the legacy split)
+  test_frac: 0.15
+  val_frac: 0.15
+
+encoding:
+  t_max: 20                       # number of SNN time steps
+  ttfs_segments: 4
+  ttfs_reduce: max                # how each 1 s segment is summarised: max | mean
+  ttfs_threshold: 0.05
+  lc_init_threshold: 1.0
+  lc_surrogate_slope: 8.0
+  fs1_threshold: 0.01
+
+model:
+  conv_channels: 32
+  kernel1: 5
+  kernel2: 3
+  gn_groups: 4
+  head_dim: 64
+  hidden_dim: 128
+  beta: 0.9                       # LIF membrane decay
+
+stdp:
+  enabled: true
+  epochs: 5
+  lr: 1.0e-5
+  decay: 0.005
+  clip: 0.25
+  a_plus: 1.0
+  a_minus: 1.0
+  target_rel: {conv1: 0.06, conv2: 0.03}
+  max_step_frac: {conv1: 0.015, conv2: 0.008}
+
+train:
+  epochs: 200
+  patience: 25
+  batch_size: 32
+  lr: 3.0e-4
+  threshold_lr: 1.0e-4            # LR for the learnable level-crossing thresholds
+  weight_decay: 1.0e-5
+  grad_clip: 1.0
+  label_smoothing: 0.05
+  loss_mem_weight: 1.0            # cross-entropy on output membrane potential
+  loss_rate_weight: 0.0           # cross-entropy on output spike rate
+  noise_std: 0.01                 # Gaussian noise augmentation (train split only)
+  fall_shift_s: [1.0, 3.0]        # train falls re-cut with the impact at a random time in this range (s)
+  scheduler_factor: 0.3
+  scheduler_patience: 10
+  min_lr: 1.0e-6
+  num_workers: 0
+
+eval:
+  fall_offsets_s: [1.0, 1.5, 2.0, 2.5, 3.0]   # val/test falls evaluated with the impact at each position (s)
+  # test-fall recall is reported at each of these impact positions (s); ones outside the window are skipped
+  diagnostic_offsets_s: [0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0, 3.25, 3.5]
+  threshold_metric: f1            # metric maximised on val to choose the decision threshold: f1 | accuracy

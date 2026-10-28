@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+
+# datasets and generated artefacts
+data/
+runs/
+*.pt
+*.pth
+*.npz
+*.npy
